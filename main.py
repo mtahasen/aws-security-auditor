@@ -152,7 +152,7 @@ def scan_ec2_security_groups():
             "total_security_groups_scanned": len(security_groups),
             "findings": findings
         }
-    except Exception as e:
-        return{"error": str(e)}
     except ClientError as e:
-        return{"error": str(e)}
+        return {"error": f"AWS Error: {str(e)}"}
+    except Exception as e:
+        return {"error": f"System Error: {str(e)}"}
