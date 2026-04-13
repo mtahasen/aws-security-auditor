@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import boto3
 import os
 from botocore.exceptions import ClientError
+from datetime import datetime, timezone
 
 app = FastAPI(
     title="Infrastructure Security Auditor",
@@ -12,6 +13,7 @@ app = FastAPI(
 sts_client = boto3.client('sts')
 s3_client = boto3.client('s3')
 ec2_client = boto3.client('ec2')
+iam_client = boto3.client('iam')
 
 @app.get("/")
 def read_root():
@@ -156,3 +158,62 @@ def scan_ec2_security_groups():
         return {"error": f"AWS Error: {str(e)}"}
     except Exception as e:
         return {"error": f"System Error: {str(e)}"}
+    
+@app.get("/scan/iam")
+def scan_iam_security():
+    try:
+        findings = []
+
+        # MFA control for root user
+        summary = iam_client.get_account_summary()
+        mfa_enabled = summary['SummaryMap'].get('AccountMFAEnabled', 0)
+
+        if mfa_enabled == 0:
+            findings.append({
+                "resource": "Root Account",
+                "is_vulnerable": True,
+                "risk_reason": "CRITICAL RISK!: MFA is disabled on the root account. The account is very vulnerable to hijacking!"
+            })
+        else:
+            findings.append({
+                "resource": "Root Account",
+                "is_vulnerable": False,
+                "risk_reason": "Safe: MFA is enabled on the root account."
+            })
+
+        # Access Key age control for user accounts
+        user_response = iam_client.list_users()
+
+        for user in user_response.get('Users', []):
+            username = user['UserName']
+
+            keys_response = iam_client.list_access_keys(UserName = username)
+
+            for key in keys_response.get('AccessKeyMetadata', []):
+                key_id = key['AccessKeyId']
+                create_date = key['CreateDate']
+
+                age_in_days = (datetime.now(timezone.utc) - create_date).days
+
+            # Industry Standard (PCI-DSS, SOC2): Keys must be changed every 90 days
+            if age_in_days > 90:
+                findings.append({
+                    "resource": f"IAM User: {username}",
+                    "is_vulnerable": True,
+                    "risk_reason": f"High Risk: Access Key ({key_id}) has not been renewed for {age_in_days} and carries high risk!"
+                })
+            else:
+                findings.append({
+                    "resource": f"IAM User: {username}",
+                    "is_vulnerable": False,
+                    "risk_reason": f"Safe: Access Key ({key_id}) is currently {age_in_days} days old."
+                })
+        return({
+            "total_findings": len(findings),
+            "findings": findings
+        })
+
+    except ClientError as e:
+        return({"error": f"AWS Error: {str(e)}"})
+    except Exception as e:
+        return({"error": f"System Error: {str(e)}"})
