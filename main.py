@@ -217,3 +217,42 @@ def scan_iam_security():
         return({"error": f"AWS Error: {str(e)}"})
     except Exception as e:
         return({"error": f"System Error: {str(e)}"})
+    
+@app.get("/scan/all")
+def scan_all_resources():
+    try:
+        s3_results = scan_s3_security()
+        ec2_results = scan_ec2_security_groups()
+        iam_results = scan_iam_security()
+
+        # Error control
+        if "error" in s3_results: s3_results = {"findings": [], "error": s3_results["error"]}
+        if "error" in ec2_results: ec2_results = {"findings": [], "error": ec2_results["error"]}
+        if "error" in iam_results: iam_results = {"findings": [], "error": iam_results["error"]}
+
+        total_s3_risks = sum(1 for item in s3_results.get("findings", []) if item.get("is_vulnerable"))
+        total_ec2_risks = sum(1 for item in ec2_results.get("findings", []) if item.get("is_vulnerable"))
+        total_iam_risks = sum(1 for item in iam_results.get("findings", []) if item.get("is_vulnerable"))
+
+        master_report = {
+            "scan_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "executive_summary": {
+                "status": "Danger" if (total_ec2_risks + total_iam_risks + total_s3_risks) > 0 else "Secure",
+                "total_vulnerabilities_found": total_s3_risks + total_ec2_risks + total_iam_risks,
+                "breakdown": {
+                    "s3_risks": total_s3_risks,
+                    "ec2_risks": total_ec2_risks,
+                    "iam_risks": total_iam_risks
+                }
+            },
+            "detailed_reports": {
+                "S3_Buckets": s3_results,
+                "EC2_Security_Groups": ec2_results,
+                "IAM_Identities": iam_results
+            }
+        }
+
+        return master_report
+    
+    except Exception as e:
+        return{"error": f"Orchestrator Error: {str(e)}"}
