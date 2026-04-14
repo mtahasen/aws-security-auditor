@@ -48,8 +48,8 @@ def scan_s3_security():
         # Audit each buckets security settings
         for bucket in buckets:
             bucket_name = bucket['Name']
-            is_public_risk = False
-            risk_reason = "Safe"
+            is_vulnerable = False
+            risk_reasons = []
 
             try:
                 # Check the "Public Access Block" setting of the bucket
@@ -61,20 +61,41 @@ def scan_s3_security():
                         config.get('BlockPublicPolicy') and
                         config.get('IgnorePublicAcls') and
                         config.get('RestrictPublicBuckets')):
-                    is_public_risk = True
-                    risk_reason = "Public Access Block is partially or fully disabled!"
+                    is_vulnerable = True
+                    risk_reasons.append("Public Access Block is partially or fully disabled!") 
             
             except ClientError as e:
                 # If the buckets these firewall settings never exist, then there is a risk by default
                 if e.response['Error']['Code'] == 'NoSuchPublicAccessBlockConfiguration':
-                    is_public_risk = True
-                    risk_reason = "No Public Access Block configuration found. High Risk!"
+                    is_vulnerable = True
+                    risk_reasons.append("No Public Access Block configuration found. High Risk!")
 
+            # Check Encryption (KMS/AES-256)
+            try:
+                s3_client.get_bucket_encryption(Bucket = bucket_name)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'ServerSideEncryptionConfigurationNotFoundError':
+                    is_vulnerable = True
+                    risk_reasons.append("Encryption is disabled. Data is in plaintext!")
+
+            # Check Versioning (Ransomware Protection)
+            try:
+                versioning = s3_client.get_bucket_versioning(Bucket=bucket_name)
+                
+                if versioning.get('Status') != 'Enabled':
+                    is_vulnerable = True
+                    risk_reasons.append("Versioning is disabled. High risk of data loss/ransomware!")
+            except ClientError as e:
+                is_vulnerable = True
+                risk_reasons.append(f"Could not verify versioning: {str(e)}")
+                    
             # Add results to report
+            final_details = "Safe" if not is_vulnerable else " | ".join(risk_reasons)
+
             scan_results.append({
                 "bucket_name": bucket_name,
-                "is_vulnerable": is_public_risk,
-                "details": risk_reason
+                "is_vulnerable": is_vulnerable,
+                "details": final_details
             })
 
         return {
@@ -256,3 +277,4 @@ def scan_all_resources():
     
     except Exception as e:
         return{"error": f"Orchestrator Error: {str(e)}"}
+    
