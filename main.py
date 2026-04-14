@@ -51,8 +51,9 @@ def scan_s3_security():
             is_vulnerable = False
             risk_reasons = []
 
-            try:
-                # Check the "Public Access Block" setting of the bucket
+
+            # Check the "Public Access Block" setting of the bucket
+            try:                
                 pab = s3_client.get_public_access_block(Bucket = bucket_name)
                 config = pab.get('PublicAccessBlockConfiguration', {})
 
@@ -141,9 +142,12 @@ def scan_ec2_security_groups():
 
                 # If a specific port or port range has been entered
                 elif from_port is not None and to_port is not None:
-                    # Check that if 22 or 3389 are in this range
-                    if (from_port <= 22 <= to_port) or (from_port <= 3389 <= to_port):
-                        is_risky_port = True
+                    # Check Admin and Database ports in this range
+                    target_ports = [22, 3389, 3306, 5432, 27017, 6379, 1433]
+                    for port in target_ports:
+                        if from_port <= port <= to_port:
+                            is_risky_port = True
+                            break
 
                 # If these risky ports have been opened, check who they are for (IP address)
                 if is_risky_port:
@@ -157,20 +161,45 @@ def scan_ec2_security_groups():
 
             # If a vulnerable port is open to 0.0.0.0/0, then add to report
             if is_vulnerable:
+                ports_str = ", ".join(risky_ports) 
+                
                 findings.append({
-                    "security_group_name": sg_name,
-                    "security_group_id": sg_id,
+                    "resource": f"Security Group: {sg_name} ({sg_id})",
                     "is_vulnerable": True,
-                    "risk_reason": f"High Risk: Ports {risky_ports} are open to the world (0.0.0.0/0)!"
+                    "risk_reason": f"High Risk: Ports {ports_str} are open to the world (0.0.0.0/0)!"
                 })
             else:
                 findings.append({
-                        "security_group_name": sg_name,
-                        "security_group_id": sg_id,
-                        "is_vulnerable": False,
-                        "risk_reason": "Safe: No critical ports open to the public."
-                    })
+                    "resource": f"Security Group: {sg_name} ({sg_id})",
+                    "is_vulnerable": False,
+                    "risk_reason": "Safe: No critical ports open to the public."
+                })
         
+        # Check EC2 Instance IMDSv2
+        instances_response = ec2_client.describe_instances()
+        
+        for reservation in instances_response.get('Reservations', []):
+            for instance in reservation.get('Instances', []):
+                instance_id = instance['InstanceId']
+                state = instance.get('State', {}).get('Name')
+                
+                if state in ['running', 'stopped']:
+                    metadata_options = instance.get('MetadataOptions', {})
+                    http_tokens = metadata_options.get('HttpTokens', '')
+                    
+                    if http_tokens != 'required':
+                        findings.append({
+                            "resource": f"EC2 Instance: {instance_id}",
+                            "is_vulnerable": True,
+                            "risk_reason": "Critical: IMDSv2 is NOT enforced! Vulnerable to SSRF attacks."
+                        })
+                    else:
+                        findings.append({
+                            "resource": f"EC2 Instance: {instance_id}",
+                            "is_vulnerable": False,
+                            "risk_reason": "Safe: IMDSv2 is enforced."
+                        })
+
         return{
             "total_security_groups_scanned": len(security_groups),
             "findings": findings
