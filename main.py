@@ -315,6 +315,9 @@ def scan_all_resources():
             }
         }
 
+        saved_file = save_report_to_disk(master_report)
+        master_report["saved_at"] = saved_file
+
         return master_report
     
     except Exception as e:
