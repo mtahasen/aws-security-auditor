@@ -3,6 +3,19 @@ import boto3
 import os
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone
+import json
+
+def save_report_to_disk(report_data):
+    if not os.path.exists("reports"):
+        os.makedirs("reports")
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"reports/scan_report_{timestamp}.json"
+
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, ensure_ascii=False, indent = 4)
+
+    return filename
 
 app = FastAPI(
     title="Infrastructure Security Auditor",
