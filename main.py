@@ -4,6 +4,8 @@ import os
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone
 import json
+import glob
+from apscheduler.schedulers.background import BackgroundScheduler
 
 def save_report_to_disk(report_data):
     if not os.path.exists("reports"):
@@ -16,6 +18,22 @@ def save_report_to_disk(report_data):
         json.dump(report_data, f, ensure_ascii=False, indent = 4)
 
     return filename
+
+def cleanup_old_reports(max_files):
+    list_of_files = glob.glob('reports/*.json')
+
+    list_of_files.sort(key=os.path.getctime)
+
+    while len(list_of_files) > max_files:
+        oldest_file = list_of_files.pop(0)
+        os.remove(oldest_file)
+        print(f"Old report has been deleted: {oldest_file}")
+
+def scheduled_scan_job():
+    print("Background scan is starting...")
+    scan_all_resources()
+    cleanup_old_reports(max_files = 84)     # 12 scans per day for 7 days (every two hours), a total of 84 scans.
+    print("The scan is complete and system has been cleaned.")
 
 app = FastAPI(
     title="Infrastructure Security Auditor",
@@ -323,3 +341,6 @@ def scan_all_resources():
     except Exception as e:
         return{"error": f"Orchestrator Error: {str(e)}"}
     
+scheduler = BackgroundScheduler()
+scheduler.add_job(scheduled_scan_job, 'interval', hours=2)
+scheduler.start()
