@@ -2,10 +2,58 @@ from fastapi import FastAPI
 import boto3
 import os
 from botocore.exceptions import ClientError
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import glob
 from apscheduler.schedulers.background import BackgroundScheduler
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SOURCE_EMAIL = os.getenv("SOURCE_EMAIL")
+IAM_USER_EMAILS = {
+    "tahasen": os.getenv("TAHA_ALERT_EMAIL"),
+    "root": os.getenv("ROOT_ALERT_EMAIL")
+}
+
+def should_send_notification(issue_id, cooldown_days=2):
+    state_file = "notification_state.json"
+    
+    if not os.path.exists(state_file):
+        with open(state_file, "w") as f: 
+            json.dump({}, f)
+            
+    with open(state_file, "r") as f:
+        notifications = json.load(f)
+        
+    last_sent = notifications.get(issue_id)
+    
+    if last_sent:
+        last_sent_dt = datetime.fromisoformat(last_sent)
+        if datetime.now() < last_sent_dt + timedelta(days=cooldown_days):
+            return False
+            
+    notifications[issue_id] = datetime.now().isoformat()
+    with open(state_file, "w") as f:
+        json.dump(notifications, f, indent=4)
+    return True
+
+def send_ses_email(target_email, subject, body):
+    ses_client = boto3.client('ses', region_name='us-east-1') 
+    
+    try:
+        response = ses_client.send_email(
+            Source=SOURCE_EMAIL,
+            Destination={'ToAddresses': [target_email]},
+            Message={
+                'Subject': {'Data': subject},
+                'Body': {'Text': {'Data': body}}
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"SES email error: {str(e)}")
+        return False
 
 def save_report_to_disk(report_data):
     if not os.path.exists("reports"):
@@ -255,6 +303,20 @@ def scan_iam_security():
                 "is_vulnerable": True,
                 "risk_reason": "CRITICAL RISK!: MFA is disabled on the root account. The account is very vulnerable to hijacking!"
             })
+
+            issue_id = "root_mfa_disabled"
+            if should_send_notification(issue_id, cooldown_days=2):
+                target_email = IAM_USER_EMAILS.get("root")
+                if target_email:
+                    subject = "CRITICAL SECURITY ALERT: Root Account MFA Disabled!"
+                    body = "MFA is disabled on your AWS Root account. Please enable it immediately to prevent account hijacking."
+                    send_ses_email(target_email, subject, body)
+                    print("Warning email sent for Root account.")
+                else:
+                    print("Email not found for root, mail could not be sent.")
+            else:
+                print("Root MFA warning is in cooldown period.")
+
         else:
             findings.append({
                 "resource": "Root Account",
@@ -276,19 +338,34 @@ def scan_iam_security():
 
                 age_in_days = (datetime.now(timezone.utc) - create_date).days
 
-            # Industry Standard (PCI-DSS, SOC2): Keys must be changed every 90 days
-            if age_in_days > 90:
-                findings.append({
-                    "resource": f"IAM User: {username}",
-                    "is_vulnerable": True,
-                    "risk_reason": f"High Risk: Access Key ({key_id}) has not been renewed for {age_in_days} and carries high risk!"
-                })
-            else:
-                findings.append({
-                    "resource": f"IAM User: {username}",
-                    "is_vulnerable": False,
-                    "risk_reason": f"Safe: Access Key ({key_id}) is currently {age_in_days} days old."
-                })
+                # Industry Standard (PCI-DSS, SOC2): Keys must be changed every 90 days
+                if age_in_days > 90:
+                    findings.append({
+                        "resource": f"IAM User: {username}",
+                        "is_vulnerable": True,
+                        "risk_reason": f"High Risk: Access Key ({key_id}) has not been renewed for {age_in_days} and carries high risk!"
+                    })
+
+                    issue_id = f"{username}_access_key_expired"
+                    if should_send_notification(issue_id, cooldown_days=2):
+                        target_email = IAM_USER_EMAILS.get(username)
+                        
+                        if target_email:
+                            subject = "CRITICAL: AWS Access Key Renewal Reminder"
+                            body = f"Hello {username},\n\nYour AWS Access Key '{key_id}' has not been changed for {age_in_days} days. Please renew it immediately according to security policies."
+                            send_ses_email(target_email, subject, body)
+                            print(f"SES warning email sent to {username} ({target_email}).")
+                        else:
+                            print(f"Email not found for {username}, mail could not be sent.")
+                    else:
+                        print(f"Notification cooldown is active for {username}.")
+
+                else:
+                    findings.append({
+                        "resource": f"IAM User: {username}",
+                        "is_vulnerable": False,
+                        "risk_reason": f"Safe: Access Key ({key_id}) is currently {age_in_days} days old."
+                    })
         return({
             "total_findings": len(findings),
             "findings": findings
@@ -344,3 +421,4 @@ def scan_all_resources():
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_scan_job, 'interval', hours=2)
 scheduler.start()
+
