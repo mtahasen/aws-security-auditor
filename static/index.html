@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Security Auditor Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar-brand { font-weight: 600; color: #0d6efd !important; }
+        .card { border: none; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .table thead th { background-color: #e9ecef; border-bottom: 2px solid #dee2e6; color: #495057; }
+        .badge-safe { background-color: #198754; }
+        .badge-danger { background-color: #dc3545; }
+        .loader { display: none; }
+        .nav-link { cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-4">
+    <div class="container">
+        <a class="navbar-brand d-flex align-items-center" onclick="showPage('main')" style="cursor:pointer;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-shield-check me-2" viewBox="0 0 16 16">
+                <path d="M10.854 5.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 7.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
+                <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2z"/>
+            </svg>
+            AWS Auditor
+        </a>
+        <div class="navbar-nav">
+            <a class="nav-link active px-3" id="nav-main" onclick="showPage('main')">Dashboard</a>
+            <a class="nav-link px-3" id="nav-reports" onclick="showPage('reports')">Past Reports</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+    <div id="page-main">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4 class="text-secondary">Executive Summary</h4>
+            <button id="scanBtn" class="btn btn-primary px-4 shadow-sm" onclick="startScan()">
+                <span id="btnText">Run Full Security Scan</span>
+                <div id="btnLoader" class="spinner-border spinner-border-sm text-light loader" role="status"></div>
+            </button>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card p-3 border-start border-primary border-4">
+                    <h6 class="text-muted">System Status</h6>
+                    <h3 id="statusText" class="mb-0">-</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card p-3 border-start border-danger border-4">
+                    <h6 class="text-muted">Total Vulnerabilities</h6>
+                    <h3 id="totalVuln" class="mb-0 text-danger">0</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card p-3 border-start border-success border-4">
+                    <h6 class="text-muted">Last Scan Time</h6>
+                    <h6 id="scanTime" class="mb-0 mt-2">-</h6>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4" id="chartRow" style="display: none;">
+            <div class="col-md-6 mx-auto">
+                <div class="card p-3 shadow-sm text-center">
+                    <h6 class="text-muted mb-3">Vulnerability Distribution</h6>
+                    <div style="height: 250px;">
+                        <canvas id="vulnChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="text-secondary mb-0">Vulnerability Details</h5>
+                <button id="exportBtn" class="btn btn-outline-success btn-sm" onclick="exportToCSV()" style="display: none;">
+                    Export to CSV
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle" id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Resource</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr><td colspan="4" class="text-center text-muted py-4">No scan data available. Click 'Run Full Security Scan' to begin.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="page-reports" style="display: none;">
+        <div class="card p-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="text-secondary mb-0">Historical Scan Reports</h4>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadReportsList()">Refresh List</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Report Filename</th>
+                            <th>Date Generated</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function showPage(pageName) {
+        if (pageName === 'main') {
+            document.getElementById('page-main').style.display = 'block';
+            document.getElementById('page-reports').style.display = 'none';
+            document.getElementById('nav-main').classList.add('active');
+            document.getElementById('nav-reports').classList.remove('active');
+        } else {
+            document.getElementById('page-main').style.display = 'none';
+            document.getElementById('page-reports').style.display = 'block';
+            document.getElementById('nav-main').classList.remove('active');
+            document.getElementById('nav-reports').classList.add('active');
+            loadReportsList();
+        }
+    }
+
+    async function startScan() {
+        const btnText = document.getElementById('btnText');
+        const btnLoader = document.getElementById('btnLoader');
+        const btn = document.getElementById('scanBtn');
+        const tableBody = document.getElementById('tableBody');
+
+        btn.disabled = true;
+        btnText.innerText = 'Scanning AWS Infrastructure... ';
+        btnLoader.style.display = 'inline-block';
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status"></div><br>Communicating with AWS...</td></tr>';
+
+        try {
+            const response = await fetch('/scan/all');
+            const data = await response.json();
+
+            document.getElementById('statusText').innerText = data.executive_summary.status;
+            document.getElementById('totalVuln').innerText = data.executive_summary.total_vulnerabilities_found;
+            document.getElementById('scanTime').innerText = data.scan_date;
+            document.getElementById('exportBtn').style.display = 'block';
+
+            document.getElementById('chartRow').style.display = 'block';
+            const ctx = document.getElementById('vulnChart').getContext('2d');
+            if(window.myChart) { window.myChart.destroy(); }
+            window.myChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['S3 Risks', 'EC2 Risks', 'IAM Risks'],
+                    datasets: [{
+                        data: [
+                            data.executive_summary.breakdown.s3_risks,
+                            data.executive_summary.breakdown.ec2_risks,
+                            data.executive_summary.breakdown.iam_risks
+                        ],
+                        backgroundColor: ['#0d6efd', '#dc3545', '#ffc107'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            tableBody.innerHTML = '';
+            const categories = [
+                { name: 'S3 Storage', data: data.detailed_reports.S3_Buckets.findings },
+                { name: 'EC2 Networking', data: data.detailed_reports.EC2_Security_Groups.findings },
+                { name: 'IAM Identities', data: data.detailed_reports.IAM_Identities.findings }
+            ];
+
+            categories.forEach(cat => {
+                if(cat.data) {
+                    cat.data.forEach(item => {
+                        const isVuln = item.is_vulnerable;
+                        const row = `
+                            <tr>
+                                <td class="fw-bold text-secondary">${cat.name}</td>
+                                <td>${item.bucket_name || item.resource}</td>
+                                <td><span class="badge ${isVuln ? 'badge-danger' : 'badge-safe'} px-2 py-1">${isVuln ? 'VULNERABLE' : 'SECURE'}</span></td>
+                                <td class="${isVuln ? 'text-danger fw-semibold' : 'text-muted'}">${item.details || item.risk_reason}</td>
+                            </tr>
+                        `;
+                        tableBody.innerHTML += row;
+                    });
+                }
+            });
+
+        } catch (error) {
+            tableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">Error: ${error.message}</td></tr>`;
+        } finally {
+            btn.disabled = false;
+            btnText.innerText = 'Run Full Security Scan';
+            btnLoader.style.display = 'none';
+        }
+    }
+
+    function exportToCSV() {
+        let csv = [];
+        const rows = document.querySelectorAll("#resultsTable tr");
+        
+        for (let i = 0; i < rows.length; i++) {
+            let row = [], cols = rows[i].querySelectorAll("td, th");
+            for (let j = 0; j < cols.length; j++) 
+                row.push('"' + cols[j].innerText + '"');
+            csv.push(row.join(","));
+        }
+
+        const csvContent = "data:text/csv;charset=utf-8," + csv.join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "aws_security_report.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    async function loadReportsList() {
+        const tbody = document.getElementById('reportsTableBody');
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center">Loading reports...</td></tr>';
+        try {
+            const response = await fetch('/reports-list');
+            const files = await response.json();
+            if(files.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No reports found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            files.forEach(file => {
+                const dateStr = file.replace('scan_report_', '').replace('.json', '');
+                tbody.innerHTML += `
+                    <tr>
+                        <td class="font-monospace text-primary">${file}</td>
+                        <td>${dateStr}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-primary me-2" onclick="viewReport('${file}')">View</button>
+                            <a href="/download-report/${file}" class="btn btn-sm btn-primary">Download</a>
+                        </td>
+                    </tr>
+                `;
+            });
+        } catch (error) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">Failed to load reports.</td></tr>';
+        }
+    }
+
+    function viewReport(filename) { window.open(`/view-report/${filename}`, '_blank'); }
+</script>
+</body>
+</html>

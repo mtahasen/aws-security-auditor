@@ -7,6 +7,8 @@ import json
 import glob
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 load_dotenv()
 
@@ -94,9 +96,40 @@ s3_client = boto3.client('s3')
 ec2_client = boto3.client('ec2')
 iam_client = boto3.client('iam')
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "Auditor Engine is running perfectly!"}
+    return FileResponse("static/index.html")
+
+@app.get("/reports-list")
+def list_reports():
+    if not os.path.exists("reports"):
+        return []
+    
+    files = [f for f in os.listdir("reports") if f.endswith(".json")]
+    # Sort files by newest first
+    files.sort(reverse=True)
+    return files
+
+@app.get("/download-report/{filename}")
+def download_report(filename: str):
+    file_path = os.path.join("reports", filename)
+    if os.path.exists(file_path):
+        return FileResponse(
+            path=file_path, 
+            filename=filename, 
+            media_type='application/json'
+        )
+    return {"error": "File not found"}
+
+@app.get("/view-report/{filename}")
+def view_report(filename: str):
+    file_path = os.path.join("reports", filename)
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"error": "File not found"}
 
 # AWS Connection Test Endpoint
 @app.get("/aws-test")
