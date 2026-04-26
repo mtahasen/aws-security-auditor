@@ -12,7 +12,7 @@ load_dotenv()
 
 SOURCE_EMAIL = os.getenv("SOURCE_EMAIL")
 IAM_USER_EMAILS = {
-    "tahasen": os.getenv("TAHA_ALERT_EMAIL"),
+    "taha": os.getenv("TAHA_ALERT_EMAIL"),
     "root": os.getenv("ROOT_ALERT_EMAIL")
 }
 
@@ -39,7 +39,7 @@ def should_send_notification(issue_id, cooldown_days=2):
     return True
 
 def send_ses_email(target_email, subject, body):
-    ses_client = boto3.client('ses', region_name='us-east-1') 
+    ses_client = boto3.client('ses', region_name='eu-central-1') 
     
     try:
         response = ses_client.send_email(
@@ -309,9 +309,12 @@ def scan_iam_security():
                 target_email = IAM_USER_EMAILS.get("root")
                 if target_email:
                     subject = "CRITICAL SECURITY ALERT: Root Account MFA Disabled!"
-                    body = "MFA is disabled on your AWS Root account. Please enable it immediately to prevent account hijacking."
-                    send_ses_email(target_email, subject, body)
-                    print("Warning email sent for Root account.")
+                    body = "MFA is disabled on your AWS Root account. Please enable it immediately to prevent account hijacking."                  
+                    success = send_ses_email(target_email, subject, body)
+                    if success:
+                        print("Success: Warning email delivered to AWS SES for Root account.")
+                    else:
+                        print("Failure: AWS SES rejected the email for Root. Check terminal logs.")
                 else:
                     print("Email not found for root, mail could not be sent.")
             else:
@@ -353,8 +356,11 @@ def scan_iam_security():
                         if target_email:
                             subject = "CRITICAL: AWS Access Key Renewal Reminder"
                             body = f"Hello {username},\n\nYour AWS Access Key '{key_id}' has not been changed for {age_in_days} days. Please renew it immediately according to security policies."
-                            send_ses_email(target_email, subject, body)
-                            print(f"SES warning email sent to {username} ({target_email}).")
+                            success = send_ses_email(target_email, subject, body)                           
+                            if success:
+                                print(f"Success: SES warning email delivered to {username}.")
+                            else:
+                                print(f"Failure: AWS SES rejected the email for {username}. Check terminal logs.")
                         else:
                             print(f"Email not found for {username}, mail could not be sent.")
                     else:

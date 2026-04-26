@@ -2,3 +2,6 @@ venv/
 __pycache__/
 reports/
 .env
+
+# Application State and Memory
+notification_state.json
