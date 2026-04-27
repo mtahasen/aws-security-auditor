@@ -5,3 +5,5 @@ reports/
 
 # Application State and Memory
 notification_state.json
+
+security_auditor.db

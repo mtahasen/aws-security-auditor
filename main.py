@@ -9,7 +9,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from database_manager import setup_database, save_scan_to_db
 
+setup_database()
 load_dotenv()
 
 SOURCE_EMAIL = os.getenv("SOURCE_EMAIL")
@@ -451,6 +453,8 @@ def scan_all_resources():
 
         saved_file = save_report_to_disk(master_report)
         master_report["saved_at"] = saved_file
+
+        save_scan_to_db(master_report, saved_file)
 
         return master_report
     
