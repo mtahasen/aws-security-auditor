@@ -77,10 +77,8 @@ def save_scan_to_db(master_report, json_path):
                 is_vulnerable = finding.get('is_vulnerable', False)
                 
                 if is_vulnerable:
-                    # GÜNCELLEME BURADA: risk_reason yoksa details'e bak
                     risk_reason = finding.get('risk_reason', finding.get('details', 'Unknown Risk'))
                     
-                    # Handle Vulnerability Catalog (Normalized)
                     cursor.execute("SELECT vuln_id FROM Vulnerability_Catalog WHERE risk_reason = ?", (risk_reason,))
                     row = cursor.fetchone()
                     
@@ -93,7 +91,6 @@ def save_scan_to_db(master_report, json_path):
                         )
                         vuln_id = cursor.lastrowid
 
-                # GÜNCELLEME BURADA: resource yoksa bucket_name'e bak
                 resource_name = finding.get('resource', finding.get('bucket_name', 'Unknown'))
                 
                 cursor.execute(
